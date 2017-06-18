@@ -116,22 +116,22 @@ struct cd_tree_s {
 typedef struct bin_mdef_s bin_mdef_t;
 struct bin_mdef_s {
 	int refcnt;
-	int32 n_ciphone;    /**< Number of base (CI) phones */ // ci phones should not be extended, otherwise senons will be shared
-	int32 n_phone;	    /**< Number of base (CI) phones + (CD) triphones */ // increase
+	int32 n_ciphone;    /**< Number of base (CI) phones */
+	int32 n_phone;	    /**< Number of base (CI) phones + (CD) triphones */
 	int32 n_emit_state; /**< Number of emitting states per phone (0 for heterogeneous) */
 	int32 n_ci_sen;	    /**< Number of CI senones; these are the first */
 	int32 n_sen;	    /**< Number of senones (CI+CD) */
 	int32 n_tmat;	    /**< Number of transition matrices */
-	int32 n_sseq;       /**< Number of unique senone sequences */ // update
+	int32 n_sseq;       /**< Number of unique senone sequences */
 	int32 n_ctx;	    /**< Number of phones of context */
-	int32 n_cd_tree;    /**< Number of nodes in cd_tree (below) */ // update
+	int32 n_cd_tree;    /**< Number of nodes in cd_tree (below) */
 	int16 sil;	    /**< CI phone ID for silence */
 
 	mmio_file_t *filemap;/**< File map for this file (if any) */
-	char **ciname;       /**< CI phone names */ // add names
-	cd_tree_t *cd_tree;  /**< Tree mapping CD phones to phone IDs */ // add names
-	mdef_entry_t *phone; /**< All phone structures */ // add diphones
-	uint16 **sseq;       /**< Unique senone sequences (2D array built at load time) */ // update
+	char **ciname;       /**< CI phone names */
+	cd_tree_t *cd_tree;  /**< Tree mapping CD phones to phone IDs */
+	mdef_entry_t *phone; /**< All phone structures */
+	uint16 **sseq;       /**< Unique senone sequences (2D array built at load time) */
 	uint8 *sseq_len;     /**< Number of states in each sseq (NULL for homogeneous) */
 
 	/* These two are not stored on disk, but are generated at load time. */
