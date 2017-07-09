@@ -564,6 +564,7 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
 
     /* Build diphones */
     sseq_left_size = m->n_emit_state / 3;
+    n_diphone = 0;
 
     for (i = 0; i < m->n_ciphone; ++i) {
         for (j = 0; j < m->n_ciphone; ++j) {
@@ -592,7 +593,7 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
         }
     }
 
-    m->n_phone += n_diphone;
+    m->n_phone = m->n_ciphone + n_diphone;
     m->n_sseq += n_diphone;
 
     /* Build wpos_ci_lclist and rebuild cd_tree from it */
