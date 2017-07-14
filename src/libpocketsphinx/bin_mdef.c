@@ -572,7 +572,7 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
             lid = bin_mdef_phone_id_nearest(m, j, -1, i, WORD_POSN_SINGLE);
 
             if (bid >= m->n_ciphone && lid >= m->n_ciphone) {
-                pdid = m->n_phone + n_diphone;
+                pdid = m->n_ciphone + n_diphone;
                 m->phone[pdid].ssid = m->n_sseq + n_diphone;
                 m->phone[pdid].tmat = m->phone[bid].tmat;
                 m->phone[pdid].info.cd.wpos = WORD_POSN_SINGLE;
