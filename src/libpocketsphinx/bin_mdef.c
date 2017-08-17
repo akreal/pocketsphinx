@@ -39,11 +39,11 @@
  * File: bin_mdef.c
  * 
  * Description: 
- *    Binary format model definition files, with support for
- *    heterogeneous topologies and variable-size N-phones
+ *	Binary format model definition files, with support for
+ *	heterogeneous topologies and variable-size N-phones
  *
  * Author: 
- *     David Huggins-Daines <dhuggins@cs.cmu.edu>
+ * 	David Huggins-Daines <dhuggins@cs.cmu.edu>
  *********************************************************************/
 
 /* System headers. */
@@ -201,10 +201,10 @@ build_wpos_ci_lclist(bin_mdef_t *m)
     wpos_ci_lclist = (ph_lc_t ***) ckd_calloc_2d(N_WORD_POSN, m->n_ciphone, sizeof(ph_lc_t *));
 
     for (i = m->n_ciphone; i < m->n_phone; ++i) {
-		ci = m->phone[i].info.cd.ctx[0];
-		lc = m->phone[i].info.cd.ctx[1];
-		rc = m->phone[i].info.cd.ctx[2];
-		wpos = m->phone[i].info.cd.wpos;
+        ci = m->phone[i].info.cd.ctx[0];
+        lc = m->phone[i].info.cd.ctx[1];
+        rc = m->phone[i].info.cd.ctx[2];
+        wpos = m->phone[i].info.cd.wpos;
 
         if ((lcptr = find_ph_lc(wpos_ci_lclist[wpos][(int) ci], lc))
             == NULL) {
@@ -216,7 +216,7 @@ build_wpos_ci_lclist(bin_mdef_t *m)
         if ((rcptr = find_ph_rc(lcptr->rclist, rc)) != NULL) {
             __BIGSTACKVARIABLE__ char buf[4096];
 
-			bin_mdef_phone_str(m, rcptr->pid, buf);
+            bin_mdef_phone_str(m, rcptr->pid, buf);
             E_FATAL("Duplicate triphone: %s\n", buf);
         }
 
@@ -227,7 +227,128 @@ build_wpos_ci_lclist(bin_mdef_t *m)
         lcptr->rclist = rcptr;
     }
 
-	return wpos_ci_lclist;
+    return wpos_ci_lclist;
+}
+
+static void
+build_diphones(bin_mdef_t *m)
+{
+    int i, j, k, n_diphone, n_phone, sseq_left_size, pdid, bid, lid;
+    ph_lc_t ***wpos_ci_lclist;
+    mdef_entry_t *phone_temp;
+    uint16 **sseq_temp;
+
+    /* Number of CI phones + maximum possible number of diphones */
+    n_phone = m->n_ciphone + m->n_ciphone * m->n_ciphone;
+    phone_temp = ckd_calloc(n_phone, sizeof(*phone_temp));
+    sseq_temp = ckd_calloc(n_phone, sizeof(*sseq_temp));
+
+    /* Copy over CI phone information. */
+    for (i = 0; i < m->n_ciphone; ++i) {
+        phone_temp[i].ssid = i;
+        phone_temp[i].tmat = m->phone[i].tmat;
+        phone_temp[i].info.cd.wpos = m->phone[i].info.cd.wpos;
+        phone_temp[i].info.cd.ctx[0] = m->phone[i].info.cd.ctx[0];
+        phone_temp[i].info.cd.ctx[1] = m->phone[i].info.cd.ctx[1];
+        phone_temp[i].info.cd.ctx[2] = m->phone[i].info.cd.ctx[2];
+
+        sseq_temp[phone_temp[i].ssid] = ckd_calloc(m->n_emit_state, sizeof(**sseq_temp));
+
+        for (k = 0; k < m->n_emit_state; ++k)
+            sseq_temp[i][k] = m->sseq[m->phone[i].ssid][k];
+    }
+
+    /*
+      A diphone combines last 1/3 of senones of 1st triphone
+      and first 2/3 of senones of 2nd triphone:
+
+        |  phone1 | phone2  |
+        |_________|_________|
+              |         |
+              | diphone |
+    */
+    sseq_left_size = m->n_emit_state / 3;
+
+    n_diphone = 0;
+
+    /* Construct diphone units. */
+    for (i = 0; i < m->n_ciphone; ++i) {
+        for (j = 0; j < m->n_ciphone; ++j) {
+            bid = bin_mdef_phone_id_nearest(m, i, j, -1, WORD_POSN_SINGLE);
+            lid = bin_mdef_phone_id_nearest(m, j, -1, i, WORD_POSN_SINGLE);
+
+            if (bid >= m->n_ciphone && lid >= m->n_ciphone) {
+                pdid = m->n_ciphone + n_diphone;
+                phone_temp[pdid].ssid = m->n_ciphone + n_diphone;
+                phone_temp[pdid].tmat = m->phone[bid].tmat;
+                phone_temp[pdid].info.cd.wpos = WORD_POSN_SINGLE;
+                phone_temp[pdid].info.cd.ctx[0] = i;
+                phone_temp[pdid].info.cd.ctx[1] = j;
+                phone_temp[pdid].info.cd.ctx[2] = 0;
+
+                sseq_temp[phone_temp[pdid].ssid] = ckd_calloc(m->n_emit_state, sizeof(**sseq_temp));
+
+                for (k = 0; k < sseq_left_size; ++k)
+                    sseq_temp[phone_temp[pdid].ssid][k] = m->sseq[m->phone[lid].ssid][m->n_emit_state - 1 - k];
+
+                for (; k < m->n_emit_state; ++k)
+                    sseq_temp[phone_temp[pdid].ssid][k] = m->sseq[m->phone[bid].ssid][k - sseq_left_size];
+
+                n_diphone++;
+            }
+        }
+    }
+
+    ckd_free(m->phone);
+    m->phone = phone_temp;
+    m->n_phone = m->n_ciphone + n_diphone;
+
+    ckd_free(m->sseq);
+    m->sseq = sseq_temp;
+    m->n_sseq = m->n_ciphone + n_diphone;
+
+    /* Build wpos_ci_lclist and rebuild cd_tree from it */
+    wpos_ci_lclist = build_wpos_ci_lclist(m);
+    build_cd_tree(m, wpos_ci_lclist);
+}
+
+static void
+build_senone_maps(bin_mdef_t *m)
+{
+    int32 i, j;
+
+    /* Build the CD-to-CI mappings using the senone sequences.
+     * This is the only really accurate way to do it, though it is
+     * still inaccurate in the case of heterogeneous topologies or
+     * cross-state tying. */
+    m->cd2cisen = (int16 *) ckd_malloc(m->n_sen * sizeof(*m->cd2cisen));
+    m->sen2cimap = (int16 *) ckd_malloc(m->n_sen * sizeof(*m->sen2cimap));
+
+    /* Default mappings (identity, none) */
+    for (i = 0; i < m->n_ci_sen; ++i)
+        m->cd2cisen[i] = i;
+    for (; i < m->n_sen; ++i)
+        m->cd2cisen[i] = -1;
+    for (i = 0; i < m->n_sen; ++i)
+        m->sen2cimap[i] = -1;
+    for (i = 0; i < m->n_phone; ++i) {
+        int32 j, ssid = m->phone[i].ssid;
+
+        for (j = 0; j < bin_mdef_n_emit_state_phone(m, i); ++j) {
+            int s = bin_mdef_sseq2sen(m, ssid, j);
+            int ci = bin_mdef_pid2ci(m, i);
+            /* Take the first one and warn if we have cross-state tying. */
+            if (m->sen2cimap[s] == -1)
+                m->sen2cimap[s] = ci;
+
+            if (j > bin_mdef_n_emit_state_phone(m, ci))
+                E_WARN("CD phone %d has fewer states than CI phone %d\n",
+                       i, ci);
+            else
+                m->cd2cisen[s] =
+                    bin_mdef_sseq2sen(m, m->phone[ci].ssid, j);
+        }
+    }
 }
 
 bin_mdef_t *
@@ -237,6 +358,7 @@ bin_mdef_read_text(cmd_ln_t *config, const char *filename)
     mdef_t *mdef;
     int i;
     int nchars;
+    int16 do_diphones;
 
     if ((mdef = mdef_init((char *) filename, TRUE)) == NULL)
         return NULL;
@@ -251,13 +373,6 @@ bin_mdef_read_text(cmd_ln_t *config, const char *filename)
     if (mdef->n_sseq > BAD_SSID) {
         E_ERROR("Number of senone sequences exceeds limit: %d > %d\n",
                 mdef->n_sseq, BAD_SSID);
-        mdef_free(mdef);
-        return NULL;
-    }
-    /* We use uint8 for ciphones */
-    if (mdef->n_ciphone > 255) {
-        E_ERROR("Number of phones exceeds limit: %d > %d\n",
-                mdef->n_ciphone, 255);
         mdef_free(mdef);
         return NULL;
     }
@@ -319,7 +434,17 @@ bin_mdef_read_text(cmd_ln_t *config, const char *filename)
         }
     }
 
-    build_cd_tree(bmdef, mdef->wpos_ci_lclist);
+    do_diphones = (config && strcmp(cmd_ln_str_r(config, "-diphones"), "synthetic") == 0);
+    if (do_diphones) {
+        build_diphones(bmdef); // It also builds cd_tree
+
+        ckd_free(bmdef->cd2cisen);
+        ckd_free(bmdef->sen2cimap);
+        build_senone_maps(bmdef);
+    }
+    else {
+        build_cd_tree(bmdef, mdef->wpos_ci_lclist);
+    }
 
     mdef_free(mdef);
 
@@ -368,15 +493,15 @@ bin_mdef_free(bin_mdef_t * m)
 static const char format_desc[] =
     "BEGIN FILE FORMAT DESCRIPTION\n"
     "int32 n_ciphone;    /**< Number of base (CI) phones */\n"
-    "int32 n_phone;         /**< Number of base (CI) phones + (CD) triphones */\n"
+    "int32 n_phone;	     /**< Number of base (CI) phones + (CD) triphones */\n"
     "int32 n_emit_state; /**< Number of emitting states per phone (0 if heterogeneous) */\n"
     "int32 n_ci_sen;     /**< Number of CI senones; these are the first */\n"
-    "int32 n_sen;         /**< Number of senones (CI+CD) */\n"
-    "int32 n_tmat;         /**< Number of transition matrices */\n"
+    "int32 n_sen;	     /**< Number of senones (CI+CD) */\n"
+    "int32 n_tmat;	     /**< Number of transition matrices */\n"
     "int32 n_sseq;       /**< Number of unique senone sequences */\n"
-    "int32 n_ctx;         /**< Number of phones of context */\n"
+    "int32 n_ctx;	     /**< Number of phones of context */\n"
     "int32 n_cd_tree;    /**< Number of nodes in CD tree structure */\n"
-    "int32 sil;         /**< CI phone ID for silence */\n"
+    "int32 sil;	     /**< CI phone ID for silence */\n"
     "char ciphones[][];  /**< CI phone strings (null-terminated) */\n"
     "char padding[];     /**< Padding to a 4-bytes boundary */\n"
     "struct { int16 ctx; int16 n_down; int32 pid/down } cd_tree[];\n"
@@ -391,12 +516,10 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
     bin_mdef_t *m;
     FILE *fh;
     size_t tree_start;
-    int32 val, i, j, k, do_mmap, swap, pdid, lid, bid, n_diphone, sseq_left_size;
+    int32 val, i, do_mmap, swap;
     long pos, end;
     int32 *sseq_size;
-    mdef_entry_t *phone_temp;
-    uint16 *sseq_start;
-    ph_lc_t ***wpos_ci_lclist;
+    int16 do_diphones;
 
     /* Try to read it as text first. */
     if ((m = bin_mdef_read_text(config, filename)) != NULL)
@@ -473,7 +596,14 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
     if (swap) {
         E_WARN("-mmap specified, but mdef is other-endian.  Will not memory-map.\n");
         do_mmap = FALSE;
-    } 
+    }
+
+    do_diphones = (config && strcmp(cmd_ln_str_r(config, "-diphones"), "synthetic") == 0);
+    if (do_diphones) {
+        E_WARN("-mmap specified, but -diphones=synthetic requires mdef to be in memory. Will not memory-map.\n");
+        do_mmap = FALSE;
+    }
+
     /* Actually try to mmap it. */
     if (do_mmap) {
         m->filemap = mmio_file_read(filename);
@@ -514,47 +644,27 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
         }
     }
 
-    phone_temp = (mdef_entry_t *) (m->cd_tree + m->n_cd_tree);
+    m->phone = (mdef_entry_t *) (m->cd_tree + m->n_cd_tree);
 
     if (swap) {
         for (i = 0; i < m->n_phone; ++i) {
-            SWAP_INT32(&phone_temp[i].ssid);
-            SWAP_INT32(&phone_temp[i].tmat);
+            SWAP_INT32(&m->phone[i].ssid);
+            SWAP_INT32(&m->phone[i].tmat);
         }
     }
 
-    /* Copy over phone information. */
-    m->phone = ckd_calloc(m->n_phone + m->n_ciphone * m->n_ciphone, sizeof(*m->phone));
-    for (i = 0; i < m->n_phone; ++i) {
-        m->phone[i].ssid = phone_temp[i].ssid;
-        m->phone[i].tmat = phone_temp[i].tmat;
-        if (i < m->n_ciphone) {
-            m->phone[i].info.ci.filler = phone_temp[i].info.ci.filler;
-        }
-        else {
-            m->phone[i].info.cd.wpos = phone_temp[i].info.cd.wpos;
-            m->phone[i].info.cd.ctx[0] = phone_temp[i].info.cd.ctx[0];
-            m->phone[i].info.cd.ctx[1] = phone_temp[i].info.cd.ctx[1];
-            m->phone[i].info.cd.ctx[2] = phone_temp[i].info.cd.ctx[2];
-        }
-    }
-
-    sseq_size = (int32 *) (phone_temp + m->n_phone);
+    sseq_size = (int32 *) (m->phone + m->n_phone);
     if (swap)
         SWAP_INT32(sseq_size);
-    m->sseq = ckd_calloc(m->n_sseq + m->n_ciphone * m->n_ciphone, sizeof(*m->sseq));
-    sseq_start = (uint16 *) (sseq_size + 1);
+    m->sseq = ckd_calloc(m->n_sseq, sizeof(*m->sseq));
+    m->sseq[0] = (uint16 *) (sseq_size + 1);
     if (swap) {
         for (i = 0; i < *sseq_size; ++i)
-            SWAP_INT16(sseq_start + i);
+            SWAP_INT16(m->sseq[0] + i);
     }
     if (m->n_emit_state) {
-        for (i = 0; i < m->n_sseq; ++i) {
-            m->sseq[i] = ckd_calloc(m->n_emit_state, sizeof(**m->sseq));
-            for (j = 0; j < m->n_emit_state; ++j) {
-                m->sseq[i][j] = *(sseq_start + i * m->n_emit_state + j);
-            }
-        }
+        for (i = 1; i < m->n_sseq; ++i)
+            m->sseq[i] = m->sseq[0] + i * m->n_emit_state;
     }
     else {
         m->sseq_len = (uint8 *) (m->sseq[0] + *sseq_size);
@@ -562,87 +672,18 @@ bin_mdef_read(cmd_ln_t *config, const char *filename)
             m->sseq[i] = m->sseq[i - 1] + m->sseq_len[i - 1];
     }
 
-    /* Build diphones */
-    sseq_left_size = m->n_emit_state / 3;
-    n_diphone = 0;
+    if (do_diphones)
+        /* Build synthetic diphone units from triphone senones */
+        build_diphones(m);
 
-    for (i = 0; i < m->n_ciphone; ++i) {
-        for (j = 0; j < m->n_ciphone; ++j) {
-            bid = bin_mdef_phone_id_nearest(m, i, j, -1, WORD_POSN_SINGLE);
-            lid = bin_mdef_phone_id_nearest(m, j, -1, i, WORD_POSN_SINGLE);
-
-            if (bid >= m->n_ciphone && lid >= m->n_ciphone) {
-                pdid = m->n_ciphone + n_diphone;
-                m->phone[pdid].ssid = m->n_sseq + n_diphone;
-                m->phone[pdid].tmat = m->phone[bid].tmat;
-                m->phone[pdid].info.cd.wpos = WORD_POSN_SINGLE;
-                m->phone[pdid].info.cd.ctx[0] = i;
-                m->phone[pdid].info.cd.ctx[1] = j;
-                m->phone[pdid].info.cd.ctx[2] = 0;
-
-                m->sseq[m->phone[pdid].ssid] = ckd_calloc(m->n_emit_state, sizeof(**m->sseq));
-
-                for (k = 0; k < sseq_left_size; ++k)
-                    m->sseq[m->phone[pdid].ssid][k] = m->sseq[m->phone[lid].ssid][m->n_emit_state - 1 - k];
-
-                for (; k < m->n_emit_state; ++k)
-                    m->sseq[m->phone[pdid].ssid][k] = m->sseq[m->phone[bid].ssid][k - sseq_left_size];
-
-                n_diphone++;
-            }
-        }
-    }
-
-    m->n_phone = m->n_ciphone + n_diphone;
-    m->n_sseq += n_diphone;
-
-    /* Build wpos_ci_lclist and rebuild cd_tree from it */
-    wpos_ci_lclist = build_wpos_ci_lclist(m);
-    build_cd_tree(m, wpos_ci_lclist);
-
-    /* Now build the CD-to-CI mappings using the senone sequences.
-     * This is the only really accurate way to do it, though it is
-     * still inaccurate in the case of heterogeneous topologies or
-     * cross-state tying. */
-    m->cd2cisen = (int16 *) ckd_malloc(m->n_sen * sizeof(*m->cd2cisen));
-    m->sen2cimap = (int16 *) ckd_malloc(m->n_sen * sizeof(*m->sen2cimap));
-
-    /* Default mappings (identity, none) */
-    for (i = 0; i < m->n_ci_sen; ++i)
-        m->cd2cisen[i] = i;
-    for (; i < m->n_sen; ++i)
-        m->cd2cisen[i] = -1;
-    for (i = 0; i < m->n_sen; ++i)
-        m->sen2cimap[i] = -1;
-    for (i = 0; i < m->n_phone; ++i) {
-        int32 j, ssid = m->phone[i].ssid;
-
-        for (j = 0; j < bin_mdef_n_emit_state_phone(m, i); ++j) {
-            int s = bin_mdef_sseq2sen(m, ssid, j);
-            int ci = bin_mdef_pid2ci(m, i);
-            /* Take the first one and warn if we have cross-state tying. */
-            if (m->sen2cimap[s] == -1)
-                m->sen2cimap[s] = ci;
-            if (m->sen2cimap[s] != ci)
-                E_WARN
-                    ("Senone %d is shared between multiple base phones\n",
-                     s);
-
-            if (j > bin_mdef_n_emit_state_phone(m, ci))
-                E_WARN("CD phone %d has fewer states than CI phone %d\n",
-                       i, ci);
-            else
-                m->cd2cisen[s] =
-                    bin_mdef_sseq2sen(m, m->phone[ci].ssid, j);
-        }
-    }
+    build_senone_maps(m);
 
     /* Set the silence phone. */
     m->sil = bin_mdef_ciphone_id(m, S3_SILENCE_CIPHONE);
 
     E_INFO
-        ("%d CI-phone, %d diphone, %d CD-phone, %d emitstate/phone, %d CI-sen, %d Sen, %d Sen-Seq\n",
-         m->n_ciphone, n_diphone, m->n_phone - m->n_ciphone, m->n_emit_state,
+        ("%d CI-phone, %d CD-phone, %d emitstate/phone, %d CI-sen, %d Sen, %d Sen-Seq\n",
+         m->n_ciphone, m->n_phone - m->n_ciphone, m->n_emit_state,
          m->n_ci_sen, m->n_sen, m->n_sseq);
     fclose(fh);
     return m;
