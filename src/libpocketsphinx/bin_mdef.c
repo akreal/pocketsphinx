@@ -299,7 +299,6 @@ build_diphones(bin_mdef_t *m)
         }
     }
 
-    ckd_free(m->phone);
     m->phone = phone_temp;
     m->n_phone = m->n_ciphone + n_diphone;
 
